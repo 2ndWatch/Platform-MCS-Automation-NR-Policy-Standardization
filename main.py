@@ -58,7 +58,7 @@ def generate_conditions_report(client_name, account_id, logger):
     nr_endpoint = 'https://api.newrelic.com/graphql'
     nr_headers = {
         'Content-Type': 'application/json',
-        'API-Key': 'NRAK-7DVT82DILPFIAXSZZ6CLPKYB8YU',
+        'API-Key': 'NRAK-S5J3BFK03G750PSM5ZTLPA3FJEJ',
     }
     nr_gql_condition_query = Template("""
     {
