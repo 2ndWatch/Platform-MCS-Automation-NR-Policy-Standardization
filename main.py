@@ -3,6 +3,7 @@ from UliPlot.XLSX import auto_adjust_xlsx_column_width as adjust
 import pandas as pd
 from datetime import datetime
 from string import Template
+import rest_api
 import requests
 import logging
 import sys
@@ -49,10 +50,8 @@ def generate_conditions_report(client_name, account_id, logger):
     success = False
 
     # create a dataframe with column headings
-    client_df = pd.DataFrame(columns=['Client', 'Condition Type', 'Condition Name', 'Query',
+    client_df = pd.DataFrame(columns=['Client', 'Condition Type', 'Policy Name', 'Condition Name', 'Query/Threshold',
                                       'Description', 'Condition ID', 'Policy ID'])
-
-    # TODO: REST API call for infrastructure alerts
 
     # query API and put all conditions for client into a dataframe
     nr_endpoint = 'https://api.newrelic.com/graphql'
@@ -97,6 +96,10 @@ def generate_conditions_report(client_name, account_id, logger):
         if conditions_list:
             for condition in conditions_list:
                 condition_name = condition['name']
+                condition_type = "nrql"
+
+                # TODO: policy name???
+
                 condition_query = condition['nrql']['query']
                 condition_description = condition['description']
                 condition_id = condition['id']
@@ -108,7 +111,7 @@ def generate_conditions_report(client_name, account_id, logger):
                 # logger.info(f'         Disable workflow: {disable_workflow}')
 
                 # 'Client', 'Condition Type', 'Condition Name', 'Query', 'Description', 'Condition ID', 'Policy ID'
-                row = [client_name, condition_name, condition_query, condition_description,
+                row = [client_name, condition_type, condition_name, condition_query, condition_description,
                        condition_id, policy_id]
                 # logger.info(f'            Row: {row}')
                 # logger.info(f'            Row length: {len(row)}')
@@ -151,13 +154,6 @@ def main():
 
     accounts = get_nr_account_ids(url, headers)
 
-    # Testing
-    # test_account = [{
-    #       "id": 2739507,
-    #       "name": "2W-MCS-SCCA"
-    # }]
-    # for account in test_account:
-
     for account in accounts['data']['actor']['accounts']:
         account_id = account['id']
         client_name = account['name']
@@ -172,11 +168,13 @@ def main():
             logger.info(f'\n{client_name} processed successfully.\n')
             all_dfs.append(client_df)
 
-    all_conditions = pd.concat(all_dfs)
+    nrql_df = pd.concat(all_dfs)
+    infra_df = rest_api.get_infrastructure_conditions()
+    nrql_infra_combined = pd.concat([nrql_df, infra_df])
 
     with pd.ExcelWriter('Conditions Report.xlsx', mode='a', if_sheet_exists='replace') as writer:
-        all_conditions.to_excel(writer, sheet_name='All Conditions', index=False)
-        adjust(all_conditions, writer, sheet_name='All Conditions', margin=3, index=False)
+        nrql_infra_combined.to_excel(writer, sheet_name='All Conditions', index=False)
+        adjust(nrql_infra_combined, writer, sheet_name='All Conditions', margin=3, index=False)
 
     workbook = openpyxl.load_workbook('Conditions Report.xlsx')
     workbook._sheets.sort(key=lambda ws: ws.title)
