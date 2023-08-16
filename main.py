@@ -7,6 +7,7 @@ import rest_api
 import requests
 import logging
 import sys
+from time import sleep
 
 
 def initialize_logger():
@@ -22,7 +23,6 @@ def initialize_logger():
 
 
 def get_nr_account_ids(url, headers):
-
     # response['data']['actor']['accounts'] (list of accounts)
     # account keys: 'id', 'name'
     nr_gql_accounts_query = Template("""
@@ -50,8 +50,9 @@ def generate_conditions_report(client_name, account_id, logger):
     success = False
 
     # create a dataframe with column headings
-    client_df = pd.DataFrame(columns=['Client', 'Condition Type', 'Policy Name', 'Condition Name', 'Query/Threshold',
-                                      'Description', 'Condition ID', 'Policy ID'])
+    client_df = pd.DataFrame(columns=['Client', 'Condition Type', 'Policy Name', 'Condition Name', 'Priority',
+                                      'Operator', 'Threshold', 'Duration', 'Query/Threshold', 'Description',
+                                      'Condition ID', 'Policy ID'])
 
     # query API and put all conditions for client into a dataframe
     nr_endpoint = 'https://api.newrelic.com/graphql'
@@ -73,6 +74,12 @@ def generate_conditions_report(client_name, account_id, logger):
                 }
                 description
                 policyId
+                terms {
+                  priority
+                  threshold
+                  thresholdDuration
+                  operator
+                }
               }
             }
           }
@@ -97,21 +104,54 @@ def generate_conditions_report(client_name, account_id, logger):
             for condition in conditions_list:
                 condition_name = condition['name']
                 condition_type = "nrql"
-
-                # TODO: policy name???
-
                 condition_query = condition['nrql']['query']
                 condition_description = condition['description']
                 condition_id = condition['id']
                 policy_id = condition['policyId']
 
-                logger.info(f'   Condition: {condition_name}')
+                if len(condition['terms']) > 1:
+                    print(f'   {condition_name} has more than one term.')
+                condition_priority = condition['terms'][0]['priority']
+                condition_operator = condition['terms'][0]['operator']
+                threshold = condition['terms'][0]['threshold']
+                threshold_duration = condition['terms'][0]['thresholdDuration']
+
+                nrql_policy_query = Template("""
+                {
+                  actor {
+                    account(id: $account_id) {
+                      alerts {
+                        policy(id: "$policy_id") {
+                          name
+                        }
+                      }
+                    }
+                  }
+                }
+                """)
+
+                policy_query_fmtd = nrql_policy_query.substitute({'account_id': account_id,
+                                                                  'policy_id': policy_id})
+                nrql_policy_response = requests.post(nr_endpoint,
+                                                     headers=nr_headers,
+                                                     json={'query': policy_query_fmtd}).json()
+
+                try:
+                    policy_name = nrql_policy_response['data']['actor']['account']['alerts']['policy']['name']
+                    logger.info(f'   Policy: {policy_name}')
+                except KeyError:
+                    logger.info(f'   There was an error retrieving policy information:\n      {nrql_response}')
+                    policy_name = 'Error'
+
+                logger.info(f'      Condition: {condition_name}')
                 # keep_workflow, disable_workflow = do_keep_disable_workflow(workflow, logger)
                 # logger.info(f'         Keep workflow: {keep_workflow}')
                 # logger.info(f'         Disable workflow: {disable_workflow}')
 
-                # 'Client', 'Condition Type', 'Condition Name', 'Query', 'Description', 'Condition ID', 'Policy ID'
-                row = [client_name, condition_type, condition_name, condition_query, condition_description,
+                # 'Client', 'Condition Type', 'Policy Name', 'Condition Name', 'Query/Threshold', 'Description',
+                # 'Condition ID', 'Policy ID'
+                row = [client_name, condition_type, policy_name, condition_name, condition_priority,
+                       condition_operator, threshold, threshold_duration, condition_query, condition_description,
                        condition_id, policy_id]
                 # logger.info(f'            Row: {row}')
                 # logger.info(f'            Row length: {len(row)}')
@@ -136,8 +176,9 @@ def generate_conditions_report(client_name, account_id, logger):
         else:
             logger.info(f'   {client_name} does not have any NRQL conditions; skipping client.\n')
 
-    except TypeError:
+    except TypeError as e:
         logger.info(f'   New Relic returned an unusual response for {client_name}; skipping client. \n')
+        print(e)
 
     return success, client_df
 
@@ -165,8 +206,14 @@ def main():
         success, client_df = generate_conditions_report(client_name_sliced, account_id, logger)
 
         if success:
-            logger.info(f'\n{client_name} processed successfully.\n')
+            logger.info(f'\n{client_name} processed successfully.')
             all_dfs.append(client_df)
+            time = 11
+            for i in range(10):
+                sleep(1)
+                time -= 1
+                print(f'   Continuing in {time}')
+            print('\n')
 
     nrql_df = pd.concat(all_dfs)
     infra_df = rest_api.get_infrastructure_conditions()

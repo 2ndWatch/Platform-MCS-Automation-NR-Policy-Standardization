@@ -1,6 +1,7 @@
 import requests
 import pandas as pd
 import json
+from time import sleep
 
 
 def get_infrastructure_conditions():
@@ -10,8 +11,9 @@ def get_infrastructure_conditions():
 
     policies_url = 'https://api.newrelic.com/v2/alerts_policies.json'
 
-    policies_df = pd.DataFrame(columns=['Client', 'Condition Type', 'Policy Name', 'Condition Name', 'Query/Threshold',
-                                        'Description', 'Condition ID', 'Policy ID'])
+    policies_df = pd.DataFrame(columns=['Client', 'Condition Type', 'Policy Name', 'Condition Name', 'Priority',
+                                        'Operator', 'Threshold', 'Duration', 'Query/Threshold', 'Description',
+                                        'Condition ID', 'Policy ID'])
 
     for client, key in keys_dict.items():
         print(f'Client: {client}')
@@ -48,27 +50,50 @@ def get_infrastructure_conditions():
 
                 # print(response.json())
 
-                if response.json()['data']:
-                    for data in response.json()['data']:
-                        print(f'   Policy {policy_ids[i]}: {data}')
+                try:
+                    if response.json()['data']:
+                        for data in response.json()['data']:
+                            print(f'   Policy {policy_ids[i]}: {data}')
 
-                        condition_type = 'infra'
-                        condition_name = data['name']
-                        condition_threshold = data['critical_threshold']
-                        condition_description = ''
-                        try:
-                            condition_description = f'{data["event_type"]} {data["select_value"]}'
-                        except KeyError:
-                            print(f'      No event_type for {condition_name}')
-                        condition_id = data['id']
+                            condition_type = 'infra'
+                            condition_name = data['name']
+                            condition_threshold = data['critical_threshold']
+                            condition_description = ''
+                            threshold = '-'
+                            threshold_duration = '-'
+                            try:
+                                threshold = condition_threshold['value']
+                            except KeyError:
+                                print('      No threshold value given.')
+                            try:
+                                threshold_duration = condition_threshold['duration_minutes']
+                            except KeyError:
+                                print('      No threshold duration given.')
+                            try:
+                                condition_description = f'{data["event_type"]} {data["select_value"]}'
+                            except KeyError:
+                                print(f'      No event_type for {condition_name}')
+                            condition_id = data['id']
 
-                        row = [client, condition_type, policy_names[i], condition_name, condition_threshold,
-                               condition_description, condition_id, policy_ids[i]]
+                            row = [client, condition_type, policy_names[i], condition_name, '-', '-', threshold,
+                                   threshold_duration, condition_threshold, condition_description, condition_id,
+                                   policy_ids[i]]
 
-                        policies_df.loc[len(policies_df)] = row
+                            policies_df.loc[len(policies_df)] = row
+                except json.decoder.JSONDecodeError:
+                    continue
         except KeyError:
             print(f'   No infrastructure polices for {client}')
 
-        print(policies_df.tail(5))
+        print(f'\n{policies_df.tail(5)}')
+
+        print(f'\n{client} processed successfully.')
+
+        time = 11
+        for i in range(10):
+            sleep(1)
+            time -= 1
+            print(f'   Continuing in {time}')
+        print('\n')
 
     return policies_df
